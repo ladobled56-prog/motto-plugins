@@ -1,0 +1,12 @@
+#!/bin/sh
+# Se ejecuta al final del instalador .pkg de macOS.
+# Quita la marca de cuarentena y fuerza a macOS a re-escanear los Audio Units.
+
+for p in "/Library/Audio/Plug-Ins/VST3/Driftbox.vst3" \
+         "/Library/Audio/Plug-Ins/Components/Driftbox.component" \
+         "/Applications/Driftbox.app"; do
+    [ -e "$p" ] && xattr -dr com.apple.quarantine "$p" 2>/dev/null
+done
+
+killall -9 AudioComponentRegistrar 2>/dev/null
+exit 0

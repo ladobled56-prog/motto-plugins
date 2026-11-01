@@ -1,0 +1,38 @@
+DRIFTBOX 1.0 - Version Standalone para macOS
+(Apple Silicon M1/M2/M3/M4 e Intel, macOS 10.13 o superior)
+=============================================================
+
+No necesita instalacion. Arrastra Driftbox.app a tu carpeta Aplicaciones
+(o dejala donde quieras) y abrela.
+
+PRIMERA VEZ
+1. macOS dira que no puede verificar al desarrollador (la app no esta
+   firmada con una cuenta de Apple Developer). Para abrirla:
+     - Haz clic derecho (o Control + clic) sobre Driftbox.app -> Abrir -> Abrir.
+     - Si no aparece el boton "Abrir": ve a Ajustes del Sistema ->
+       Privacidad y seguridad, baja hasta el aviso de Driftbox y pulsa
+       "Abrir de todos modos".
+   Si dice que la app "esta danada", abre Terminal y ejecuta:
+       xattr -dr com.apple.quarantine /Applications/Driftbox.app
+2. macOS pedira permiso para usar el microfono: pulsa "Permitir"
+   (Driftbox procesa la entrada de audio en vivo).
+3. Arriba aparece "Audio input is muted to avoid feedback loop".
+   Pulsa "Settings..." y elige tu entrada (microfono o interfaz) y tu
+   salida, y desmarca "Mute audio input".
+   USA AUDIFONOS si la entrada es el microfono, para evitar acoples.
+
+COMO USARLO
+- Todo lo que entra por el microfono/interfaz sale procesado.
+- RANDOMIZE crea un preset nuevo en cada clic; < y > recorren el historial.
+- El tempo de los efectos ritmicos se ajusta en el control BPM
+  (bajo el titulo DRIFTBOX): arrastra o haz doble clic para escribirlo.
+- LOCK en cada modulo evita que el Randomizer lo cambie.
+- VARIATION baja = cambios sutiles; alta = preset totalmente nuevo.
+
+PROCESAR MUSICA O ARCHIVOS
+La Standalone procesa audio en vivo. Para pasar canciones o pistas por el
+efecto usa la version plugin (AU o VST3) en tu DAW (Logic, Ableton...),
+o envia el audio del Mac a la entrada con BlackHole (gratuito).
+
+LATENCIA
+Si escuchas retraso, en Settings baja el "Audio buffer size" a 128 o 256.

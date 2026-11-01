@@ -1,0 +1,180 @@
+name: Build Driftbox
+
+# Compila, prueba y empaqueta el plugin para macOS y Windows.
+# Cada ejecución deja los instaladores en la pestaña "Actions" (sección Artifacts).
+# Si subes una etiqueta tipo v1.0.0, además crea un Release con los instaladores adjuntos.
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  macos:
+    name: "macOS (Universal - Apple Silicon + Intel)"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versión
+        id: ver
+        run: echo "version=$(grep -m1 -E '^project\(Driftbox VERSION' CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')" >> "$GITHUB_OUTPUT"
+
+      - name: Configurar
+        run: cmake -B build -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+
+      - name: Compilar
+        run: cmake --build build --config $BUILD_TYPE --parallel 4
+
+      - name: Pruebas automáticas
+        run: ./build/DriftboxTests_artefacts/$BUILD_TYPE/DriftboxTests
+
+      - name: Firma ad-hoc (necesaria en Apple Silicon)
+        run: |
+          ART=build/Driftbox_artefacts/$BUILD_TYPE
+          for b in "$ART/VST3/Driftbox.vst3" "$ART/AU/Driftbox.component" "$ART/Standalone/Driftbox.app"; do
+            codesign --force --deep --sign - --timestamp=none --preserve-metadata=entitlements,flags "$b"
+            codesign --verify --deep --strict "$b"
+          done
+
+      - name: Validar Audio Unit (auval)
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/Driftbox_artefacts/$BUILD_TYPE/AU/Driftbox.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          sleep 3
+          auval -v aufx Drfx Drbx
+
+      - name: Crear instalador .pkg y .zip
+        run: |
+          VER=${{ steps.ver.outputs.version }}
+          ART=build/Driftbox_artefacts/$BUILD_TYPE
+          STAGE=$(mktemp -d)/root
+          mkdir -p "$STAGE/Library/Audio/Plug-Ins/VST3" "$STAGE/Library/Audio/Plug-Ins/Components" "$STAGE/Applications"
+          cp -R "$ART/VST3/Driftbox.vst3"        "$STAGE/Library/Audio/Plug-Ins/VST3/"
+          cp -R "$ART/AU/Driftbox.component"     "$STAGE/Library/Audio/Plug-Ins/Components/"
+          cp -R "$ART/Standalone/Driftbox.app"   "$STAGE/Applications/"
+
+          # Evita que el instalador "reubique" los bundles si ya existen en otra carpeta
+          pkgbuild --analyze --root "$STAGE" components.plist
+          N=$(/usr/libexec/PlistBuddy -c "Print" components.plist | grep -c "BundleIsRelocatable" || true)
+          for ((i=0; i<N; i++)); do /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" components.plist; done
+
+          chmod +x installer/macos/scripts/postinstall
+          mkdir -p dist
+          pkgbuild --root "$STAGE" --component-plist components.plist \
+                   --scripts installer/macos/scripts \
+                   --identifier com.driftboxaudio.driftbox.pkg --version "$VER" \
+                   --install-location / "dist/Driftbox-$VER-macOS.pkg"
+
+          # Zip manual (para instalar copiando) con script de instalación
+          ZIPDIR=$(mktemp -d)/Driftbox-$VER-macOS
+          mkdir -p "$ZIPDIR"
+          cp -R "$ART/VST3/Driftbox.vst3" "$ART/AU/Driftbox.component" "$ART/Standalone/Driftbox.app" "$ZIPDIR/"
+          cp scripts/install_mac.sh "$ZIPDIR/" && chmod +x "$ZIPDIR/install_mac.sh"
+          cp README.md "$ZIPDIR/LEEME.md"
+          (cd "$(dirname "$ZIPDIR")" && ditto -c -k --keepParent "$(basename "$ZIPDIR")" "$GITHUB_WORKSPACE/dist/Driftbox-$VER-macOS.zip")
+
+          # Standalone suelta: solo la app + instrucciones (sin instalar nada)
+          mkdir -p dist-standalone
+          SADIR=$(mktemp -d)/Driftbox-Standalone-macOS
+          mkdir -p "$SADIR"
+          cp -R "$ART/Standalone/Driftbox.app" "$SADIR/"
+          cp installer/macos/LEEME-Standalone.txt "$SADIR/LEEME.txt"
+          (cd "$(dirname "$SADIR")" && ditto -c -k --keepParent "$(basename "$SADIR")" "$GITHUB_WORKSPACE/dist-standalone/Driftbox-$VER-Standalone-macOS.zip")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Driftbox-macOS
+          path: dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Driftbox-Standalone-macOS
+          path: dist-standalone/*
+
+      - name: pluginval (validación extra del VST3)
+        continue-on-error: true
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 8 --skip-gui-tests --validate-in-process \
+            --validate build/Driftbox_artefacts/$BUILD_TYPE/VST3/Driftbox.vst3
+
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versión
+        id: ver
+        shell: bash
+        run: echo "version=$(grep -m1 -E '^project\(Driftbox VERSION' CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')" >> "$GITHUB_OUTPUT"
+
+      - name: Configurar
+        run: cmake -B build -A x64
+
+      - name: Compilar
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Pruebas automáticas
+        run: .\build\DriftboxTests_artefacts\Release\DriftboxTests.exe
+
+      - name: Instalar Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Crear instalador .exe y .zip
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $art = Resolve-Path "build\Driftbox_artefacts\Release"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = (Get-Command iscc).Source }
+          & $iscc "/DAppVersion=$ver" "/DSourceDir=$art" "/O$PWD\dist" installer\windows\Driftbox.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $zipDir = "zip\Driftbox-$ver-Windows"
+          New-Item -ItemType Directory -Force -Path $zipDir | Out-Null
+          Copy-Item -Recurse "$art\VST3\Driftbox.vst3" $zipDir
+          Copy-Item "$art\Standalone\Driftbox.exe" $zipDir
+          Copy-Item scripts\install_windows.ps1 $zipDir
+          Copy-Item scripts\install_windows.bat $zipDir
+          Copy-Item README.md "$zipDir\LEEME.md"
+          Compress-Archive -Path $zipDir -DestinationPath "dist\Driftbox-$ver-Windows.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Driftbox-Windows
+          path: dist/*
+
+      - name: pluginval (validación extra del VST3)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath pv -Force
+          .\pv\pluginval.exe --strictness-level 8 --skip-gui-tests --validate-in-process --validate "build\Driftbox_artefacts\Release\VST3\Driftbox.vst3"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  release:
+    name: Publicar Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ macos, windows ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
