@@ -62,8 +62,11 @@ jobs:
 
           # Evita que el instalador "reubique" los bundles si ya existen en otra carpeta
           pkgbuild --analyze --root "$STAGE" components.plist
-          N=$(/usr/libexec/PlistBuddy -c "Print" components.plist | grep -c "BundleIsRelocatable" || true)
-          for ((i=0; i<N; i++)); do /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" components.plist; done
+          i=0
+          while /usr/libexec/PlistBuddy -c "Print :$i:BundleIsRelocatable" components.plist >/dev/null 2>&1; do
+            /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" components.plist
+            i=$((i+1))
+          done
 
           chmod +x installer/macos/scripts/postinstall
           mkdir -p dist
